@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+    <meta charset="UTF-8">
+    <title>PTN News Live - Professional</title>
+    <style>
+        body, html { margin: 0; padding: 0; width: 100%; height: 100%; background: #000; overflow: hidden; font-family: 'Segoe UI', sans-serif; color: white; }
+        .studio { position: relative; width: 100vw; height: 100vh; background: url('studio.jpg') center/cover no-repeat; }
+        .visual-box { position: absolute; right: 5%; top: 12%; width: 42%; height: 40%; border: 4px solid #00f2ff; border-radius: 12px; overflow: hidden; box-shadow: 0 0 30px rgba(0, 242, 255, 0.5); z-index: 5; background:#000; }
+        #newsImg { width: 100%; height: 100%; object-fit: cover; transition: opacity 0.8s; }
+        .script-box { position: absolute; left: 3%; top: 12%; width: 45%; height: 60%; background: rgba(0, 0, 0, 0.75); border-left: 8px solid #ff0000; padding: 25px; box-sizing: border-box; z-index: 5; overflow: hidden; }
+        #teleprompter { position: relative; font-size: 32px; line-height: 1.6; top: 100%; transition: none; }
+        .anchor-container { position: absolute; right: 0; bottom: 0; width: 60%; height: 100%; z-index: 10; pointer-events: none; display: flex; justify-content: flex-end; align-items: flex-end; }
+        #anchorCanvas { max-width: 100%; max-height: 100%; }
+        #anchorVid { display: none; }
+        .ticker-bar { position: absolute; bottom: 0; width: 100%; height: 85px; background: linear-gradient(90deg, #ff0000, #800000); display: flex; align-items: center; z-index: 20; border-top: 4px solid #fff; }
+        marquee { font-size: 38px; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+<div class="studio">
+    <div class="visual-box"><img id="newsImg" src=""></div>
+    <div class="script-box"><div id="teleprompter">Click to Start...</div></div>
+    <div class="anchor-container"><canvas id="anchorCanvas"></canvas></div>
+    <video id="anchorVid" muted loop crossorigin="anonymous"><source src="anchor_video.mp4" type="video/mp4"></video>
+    <div class="ticker-bar"><marquee id="flashTicker">PTN NEWS LIVE</marquee></div>
+</div>
+
+<script>
+    const csvUrl = "https://docs.google.com/spreadsheets/d/e/2PACX-1vQC3jX_wmuvZsFzxB_333wB2Dwj5iBWMwMRPeRKqBaKfWCPrbRZ4SnUh9GYKTCUtN1GDY1BDbH8gJmR/pub?output=csv"; 
+    const proxyUrl = "https://script.google.com/macros/s/AKfycby3Ezfd-R_jmIvKBbgMUNgjw6sbAYaNTdQCKNDdwxDo2BeOfvOzrf7TIml2cmeMckg_/exec"; 
+
+    let newsItems = [];
+    let newsIndex = 0;
+    const video = document.getElementById("anchorVid");
+    const canvas = document.getElementById("anchorCanvas");
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+
+    function processChromaKey() {
+        if (video.paused) return;
+        ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+        let frame = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        for (let i = 0; i < frame.data.length / 4; i++) {
+            let r = frame.data[i*4], g = frame.data[i*4+1], b = frame.data[i*4+2];
+            if (g > 100 && g > r * 1.3) frame.data[i*4+3] = 0;
+        }
+        ctx.putImageData(frame, 0, 0);
+        requestAnimationFrame(processChromaKey);
+    }
+
+    async function getSecurePhoto(kw) {
+        try {
+            const res = await fetch(`${proxyUrl}?kw=${encodeURIComponent(kw)}`);
+            const data = await res.json();
+            document.getElementById("newsImg").src = data.url;
+        } catch (e) { document.getElementById("newsImg").src = "backup_image_url"; }
+    }
+
+    async function loadNews() {
+        const res = await fetch(csvUrl + "?t=" + Date.now());
+        const data = await res.text();
+        const rows = data.split('\n').slice(1);
+        newsItems = rows.map(r => {
+            const c = r.split(/,(?=(?:(?:[^"]*"){2})*[^"]*$)/);
+            return { script: c[0]?.replace(/"/g,""), visual: c[1]?.replace(/"/g,""), flash: c[2]?.replace(/"/g,"") };
+        }).filter(i => i.script);
+        playNews();
+    }
+
+    function playNews() {
+        const item = newsItems[newsIndex];
+        const prompter = document.getElementById("teleprompter");
+        prompter.style.transition = "none";
+        prompter.style.top = "100%";
+        prompter.innerText = item.script;
+        document.getElementById("flashTicker").innerText = "BREAKING: " + item.flash;
+
+        getSecurePhoto(item.visual);
+
+        window.speechSynthesis.cancel();
+        const speech = new SpeechSynthesisUtterance(item.script);
+        speech.lang = 'hi-IN';
+        speech.rate = 0.9;
+
+        speech.onstart = () => {
+            video.play();
+            canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+            processChromaKey();
+            setTimeout(() => {
+                prompter.style.transition = `top ${item.script.length * 0.15}s linear`;
+                prompter.style.top = `-${prompter.offsetHeight + 50}px`;
+            }, 100);
+        };
+
+        speech.onend = () => {
+            video.pause();
+            newsIndex = (newsIndex + 1) % newsItems.length;
+            setTimeout(playNews, 2000);
+        };
+        window.speechSynthesis.speak(speech);
+    }
+
+    window.onclick = () => { if(!newsItems.length) loadNews(); };
+</script>
+</body>
+</html>
